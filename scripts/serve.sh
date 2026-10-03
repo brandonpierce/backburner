@@ -145,7 +145,9 @@ fi
 SPEC_REPLAY=${SPEC_REPLAY:-8}
 REPLAY=(); [ "$SPEC_REPLAY" != 0 ] && REPLAY=(--spec-gdn-replay "$SPEC_REPLAY")
 
-export GGML_METAL_REGFED=1 GGML_METAL_FA_GQA=1 GGML_METAL_FA_PREFILL_GQA=1 LLAMA_BATCHED_ARGMAX=1 SPEC_DRAFT_UBATCH=64
+# Metal kernel paths tuned on the M4 Pro; each can be turned off from the env (=0), e.g. on another GPU
+export GGML_METAL_REGFED=${GGML_METAL_REGFED:-1} GGML_METAL_FA_GQA=${GGML_METAL_FA_GQA:-1} \
+  GGML_METAL_FA_PREFILL_GQA=${GGML_METAL_FA_PREFILL_GQA:-1} LLAMA_BATCHED_ARGMAX=1 SPEC_DRAFT_UBATCH=64
 # lossless speculative sampling for sampled (temperature > 0) requests, e.g. omp: +12% on the omp replay
 export LLAMA_SPEC_SAMPLE=${LLAMA_SPEC_SAMPLE:-1}
 # split prefill with the phone (LLAMA_SPLIT_TAIL=IP:50060): split messages from 512 tokens (a 2k tool result would never reach
