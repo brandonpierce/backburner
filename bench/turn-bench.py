@@ -52,7 +52,9 @@ def record(**kw):
 
 cfg = 'mac' if a.build else a.config
 log_path = os.path.join(OUT, f'turn-server-{cfg}.log')
-env = dict(os.environ, PROXY='0', PORT=str(a.port), CTX='65536', KV='q8_0', CACHE_DIR=SLOTS)
+env = dict(os.environ, PROXY='0', PORT=str(a.port), CACHE_DIR=SLOTS)
+env.setdefault('CTX', '65536')   # the caller's CTX / KV win (e.g. a 16k config)
+env.setdefault('KV', 'q8_0')
 if cfg == 'mac':
     env['PHONE'] = '0'
 srv = subprocess.Popen([f'{ROOT}/scripts/serve.sh'], cwd=ROOT, env=env, stdout=open(log_path, 'w'), stderr=subprocess.STDOUT)
