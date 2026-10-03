@@ -131,8 +131,10 @@ EXTRA=(); [ $BIG = 1 ] && EXTRA=(-lm none -ot token_embd.weight=CPU -ub 256)
 LOAD_MODE=${LOAD_MODE:-none}   # default: wired (set LOAD_MODE=mmap to go back)
 # the wired load needs the GPU wired limit raised; it resets to the default (~16 GB) on every reboot, and then the model +
 # drafter + KV page and crawl (or crash the Mac). Refuse instead of running slow.
+# MIN_WL (MB): the limit the wired load needs (default 20000, for the 24 GB Mac's model + drafter + KV)
 WL=$(sysctl -n iogpu.wired_limit_mb 2>/dev/null || echo 0)
-if [ "$LOAD_MODE" != mmap ] && [ "${WL:-0}" -lt 20000 ]; then
+MIN_WL=${MIN_WL:-20000}
+if [ "$LOAD_MODE" != mmap ] && [ "${WL:-0}" -lt "$MIN_WL" ]; then
   echo "serve: iogpu.wired_limit_mb is ${WL} (reset by a reboot). Run: sudo sysctl iogpu.wired_limit_mb=20480" >&2
   exit 1
 fi
