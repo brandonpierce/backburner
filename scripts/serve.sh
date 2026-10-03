@@ -61,8 +61,8 @@ if [ -n "${SPLIT_DECODE_L:-}" ]; then
     echo "$alt"
   }
   # --no-repack: the CPU backend would otherwise read layers N+ at load and keep an anonymous repacked copy (847 MiB at
-  # IQ2_XS L=20, measured). --no-warmup: the warmup decode (2 tokens) runs every layer on the Mac until split decode routes it.
-  SD_ARGS=(-ot "^blk\.($(ge "$SDL"))\.=CPU" -ot "^output=CPU" --no-repack --no-warmup)
+  # IQ2_XS L=20, measured). The warmup decode goes through the phone like any other batch (split decode), so it stays on.
+  SD_ARGS=(-ot "^blk\.($(ge "$SDL"))\.=CPU" -ot "^output=CPU" --no-repack)
   echo "serve: SPLIT DECODE mode ON, L=$SDL: Mac GPU maps layers [0,$SDL), layers $SDL+ and output stay CPU-mapped (never read), phone tail at $LLAMA_SPLIT_TAIL runs the rest + head; spec off, no drafter, no checkpoints, no proxy, SME off" >&2
   if ! grep -qa LLAMA_SPLIT_DECODE "$B"/llama-server "$B"/*.dylib 2>/dev/null; then
     echo "serve: ************************************************************************************************" >&2
