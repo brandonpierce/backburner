@@ -8,7 +8,7 @@ set -u
 cd "$(dirname "$0")/.."
 TAIL=${1:-}
 case "$TAIL" in
-  L[0-9]*) TAIL=$HOME/Models/tail-iq4xs-$TAIL-nohead.gguf ;;
+  L[0-9]*) TAIL=$HOME/Models/${TAIL_PREFIX:-tail-iq4xs}-$TAIL-nohead.gguf ;;   # TAIL_PREFIX for another quant, e.g. tail-iq2xs
 esac
 PUP=$(TAIL_WAIT=${TAIL_WAIT:-5} scripts/phone-up.sh) || exit 1
 read -r IP _ _ _ _ _ <<< "$PUP"
@@ -36,7 +36,7 @@ if [ -z "$TAIL" ]; then
   echo "phone $IP: tail L=$(loaded)"; mem; exit 0
 fi
 test -s "$TAIL" || { echo "missing tail: $TAIL"; exit 1; }
-WANT=$(basename "$TAIL" | sed -n 's/.*-L\([0-9]*\)-.*/\1/p')
+WANT=$(basename "$TAIL" | sed -n 's/.*-L\([0-9]*\)[-.].*/\1/p')   # ...-L24-head.gguf or ...-L24.gguf
 HAVE=$(loaded)
 if [ "$HAVE" = "$WANT" ] && [ -z "${FORCE:-}" ]; then echo "phone $IP already has L=$WANT"; mem; exit 0; fi
 echo "phone $IP: tail L=$HAVE -> L=$WANT ($(du -h "$TAIL" | cut -f1))"
