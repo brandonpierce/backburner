@@ -46,6 +46,10 @@ if [ -n "${SPLIT_DECODE_L:-}" ]; then
     LLAMA_SPLIT_TAIL=$PIP:50060
   fi
   export LLAMA_SPLIT_TAIL LLAMA_SPLIT_L=$SDL LLAMA_SPLIT_DECODE=1
+  # keep the Mac GPU clocked up while the phone computes (a trivial dispatch every 1 ms, only during the wait): the A18 Pro
+  # otherwise drops its clock in the ~160 ms gap and the next head pass runs slow. Head-only bench, L=20 IQ2_XS, 160 ms gap per
+  # token: 98.7-101.0 -> 88.0-88.1 ms per token, p95 139-141 -> 95-96 ms, +0.5 W average GPU power. 2026-10-03.
+  export LLAMA_SPLIT_GPU_WARM_US=${LLAMA_SPLIT_GPU_WARM_US:-1000}
   PHONE=0 PHONE_ANE=0 PHONE_IP=${LLAMA_SPLIT_TAIL%:*}
   LOAD_MODE=mmap SPEC_TYPE=none DRAFT= SPEC_REPLAY=0 CTX_CHECKPOINTS=0 PROXY=0 SME=0 MM_SME=0
   # layer numbers >= N as a regex (no upper bound, no commas: -ot splits its value on ','); anchored so blk.2. != blk.20.
