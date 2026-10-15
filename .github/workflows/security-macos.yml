@@ -1,0 +1,44 @@
+# security-macos.yml - the macOS half of tests/security/run.sh (the cable gate and the Wi-Fi tunnel's crypto), when a change
+# touches the phone app, its protocol header or the tests.
+name: security-macos
+
+on:
+  pull_request:
+    paths: ['ios/**', 'phone-attn/**', 'tests/security/**', 'llama.cpp', '.gitmodules', '.github/workflows/security-macos.yml']
+  push:
+    branches: [main]
+    paths: ['ios/**', 'phone-attn/**', 'tests/security/**', 'llama.cpp', '.gitmodules', '.github/workflows/security-macos.yml']
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: security-macos-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    runs-on: macos-15
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Engine submodule (headers only)
+        run: git submodule update --init --depth 1 llama.cpp
+
+      - name: Cable gate and argument validators (cable-policy-test)
+        run: |
+          xcrun clang++ -std=c++17 -O1 -Wall -Wextra -Wno-unused-parameter -Wno-unused-function \
+            -Illama.cpp/include -Illama.cpp/ggml/include \
+            tests/security/cable-policy-test.cpp -o "$RUNNER_TEMP/cable-policy-test"
+          "$RUNNER_TEMP/cable-policy-test"
+
+      - name: Wi-Fi tunnel crypto (tunnel-test, Noise test vectors)
+        run: |
+          xcrun swiftc -O -parse-as-library -o "$RUNNER_TEMP/tunnel-test" \
+            ios/Backburner/Sidecar/Tunnel.swift tests/security/tunnel-test.swift
+          "$RUNNER_TEMP/tunnel-test"
