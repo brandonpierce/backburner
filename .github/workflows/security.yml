@@ -1,0 +1,119 @@
+# security.yml - the repo's own security checks on every pull request and every push to main, plus gitleaks.
+# The gates (listener rules, the personal-data check) run the base branch's copies of the scripts, so editing a checker in a
+# pull request doesn't loosen it. A pull request is judged on what it adds; pushes to main and a weekly run audit the whole tree. The hook tests run the pull request's own copies, since they test the change. A pull
+# request runs its own copy of this file, so a change to .github/ is flagged as a warning for the reviewer.
+name: security
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '17 6 * * 1'   # weekly whole-tree audit: catches content a newer rule would flag
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:   # a newer push to a pull request replaces the older run; every push to main gets its own run
+  group: security-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  GITLEAKS_VERSION: 8.30.1
+  GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb   # gitleaks_8.30.1_linux_x64.tar.gz
+
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the change
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+        with:
+          path: pr
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check out the base branch (the checks that gate)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+        with:
+          path: trusted
+          ref: ${{ github.event.pull_request.base.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Engine submodule (check-listeners reads its copy of phone-attn.h and tail-server.h)
+        run: git -C pr submodule update --init --depth 1 llama.cpp
+
+      - name: Flag changes to the checks themselves
+        if: github.event_name == 'pull_request'
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          git -C pr diff --name-only "$BASE...$HEAD" \
+            | grep -E '^(\.github/|scripts/hooks/|scripts/check-listeners\.sh$|tests/security/)' \
+            | sed 's/^/::warning::this pull request changes a security check: /' || true
+
+      - name: Personal data and secrets in this change (base branch's check-sensitive.py)
+        if: github.event_name == 'pull_request'
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          git -C pr rev-parse --verify --quiet "$HEAD^{commit}" >/dev/null || { echo "::error::commit $HEAD not found"; exit 1; }
+          git -C pr rev-parse --verify --quiet "$BASE^{commit}" >/dev/null || { echo "::error::commit $BASE not found"; exit 1; }
+          # the pre-commit check on everything the pull request adds: its tree staged over the merge base in a scratch
+          # worktree. Content already on main never fails a pull request (the push to main and the weekly run audit it), and
+          # author emails aren't checked here (squash merges replace them; the maintainer's own may not be a noreply)
+          git -C pr worktree add -q --detach "$RUNNER_TEMP/scan" "$HEAD"
+          git -C "$RUNNER_TEMP/scan" reset -q --soft "$(git -C pr merge-base "$BASE" "$HEAD")"
+          cd "$RUNNER_TEMP/scan"
+          GIT_AUTHOR_NAME=ci GIT_AUTHOR_EMAIL=0+ci@users.noreply.github.com GIT_COMMITTER_NAME=ci GIT_COMMITTER_EMAIL=0+ci@users.noreply.github.com \
+            python3 "$GITHUB_WORKSPACE/trusted/scripts/hooks/check-sensitive.py" --staged
+
+      - name: Personal data and secrets in the tracked tree (base branch's check-sensitive.py)
+        if: github.event_name != 'pull_request'
+        working-directory: pr
+        run: python3 ../trusted/scripts/hooks/check-sensitive.py --all
+
+      - name: Phone app network rules (base branch's check-listeners.sh)
+        run: |
+          cp trusted/scripts/check-listeners.sh pr/scripts/check-listeners.sh
+          bash pr/scripts/check-listeners.sh
+          git -C pr checkout -- scripts/check-listeners.sh
+
+      - name: Commit hook tests (this change's copy)
+        run: bash pr/tests/security/check-sensitive-test.sh
+
+      - name: gitleaks on the new commits
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          cd pr
+          # fail closed: gitleaks reports "no leaks found" when it can't read the range
+          git rev-parse --verify --quiet "$HEAD^{commit}" >/dev/null || { echo "::error::commit $HEAD not found"; exit 1; }
+          if [ -n "${BASE//0/}" ]; then
+            git rev-parse --verify --quiet "$BASE^{commit}" >/dev/null || { echo "::error::commit $BASE not found"; exit 1; }
+          fi
+          # a change may not bring its own gitleaks config or ignore list (they would apply to its own scan)
+          if [ "$GITHUB_EVENT_NAME" = pull_request ] && git diff --name-only "$BASE...$HEAD" | grep -E '(^|/)\.gitleaks(\.toml|ignore)$'; then
+            echo "::error::this change adds or edits a gitleaks config; those can only change on main"; exit 1
+          fi
+          curl -fsSL -o "$RUNNER_TEMP/gitleaks.tgz" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  $RUNNER_TEMP/gitleaks.tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/gitleaks.tgz" -C "$RUNNER_TEMP" gitleaks
+          # the change's own .gitattributes can't hide a file from the scan (-diff, binary): info/attributes wins
+          mkdir -p "$(git rev-parse --git-dir)/info"
+          echo '* diff' > "$(git rev-parse --git-dir)/info/attributes"
+          if [ -n "${BASE//0/}" ]; then range="$BASE..$HEAD"; else range="-1 $HEAD"; fi   # a new branch: its last commit
+          "$RUNNER_TEMP/gitleaks" git . --log-opts="--no-merges $range" --ignore-gitleaks-allow --redact --no-banner --exit-code 1
+          # merge commits aren't in the per-commit scan: also scan everything the change adds against its base
+          if [ -n "${BASE//0/}" ]; then
+            git diff "$BASE...$HEAD" | "$RUNNER_TEMP/gitleaks" stdin --ignore-gitleaks-allow --redact --no-banner --exit-code 1
+          fi
